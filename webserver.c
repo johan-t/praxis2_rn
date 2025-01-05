@@ -287,6 +287,38 @@ static int setup_server_socket(struct sockaddr_in addr) {
 }
 
 /**
+ * Sets up a UDP socket and binds it to the provided sockaddr_in address.
+ *
+ * @param addr The sockaddr_in structure representing the IP address and port of
+ * the server.
+ *
+ * @return The file descriptor of the created UDP server socket.
+ */
+static int setup_udp_socket(struct sockaddr_in addr) {
+  // Create UDP socket
+  int sock = socket(AF_INET, SOCK_DGRAM, 0);
+  if (sock == -1) {
+    perror("UDP socket");
+    exit(EXIT_FAILURE);
+  }
+
+  // Set socket to non-blocking mode
+  if (fcntl(sock, F_SETFL, O_NONBLOCK) == -1) {
+    perror("fcntl");
+    exit(EXIT_FAILURE);
+  }
+
+  // Bind socket to the provided address
+  if (bind(sock, (struct sockaddr *)&addr, sizeof(addr)) == -1) {
+    perror("UDP bind");
+    close(sock);
+    exit(EXIT_FAILURE);
+  }
+
+  return sock;
+}
+
+/**
  *  The program expects 3; otherwise, it returns EXIT_FAILURE.
  *
  *  Call as:
@@ -304,9 +336,15 @@ int main(int argc, char **argv) {
   int server_socket = setup_server_socket(addr);
 
   // Create an array of pollfd structures to monitor sockets.
-  struct pollfd sockets[2] = {
+  struct pollfd sockets[3] = {
       {.fd = server_socket, .events = POLLIN},
+      {.fd = -1, .events = 0}, // For TCP client
+      {.fd = -1, .events = 0}, // For UDP socket
   };
+
+  int udp_socket = setup_udp_socket(addr);
+  sockets[2].fd = udp_socket;
+  sockets[2].events = POLLIN;
 
   struct connection_state state = {0};
   while (true) {

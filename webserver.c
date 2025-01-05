@@ -1,10 +1,10 @@
 #include <arpa/inet.h>
-#include <assert.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <netdb.h>
 #include <netinet/in.h>
 #include <poll.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <string.h>
 #include <sys/socket.h>
@@ -22,6 +22,55 @@ struct tuple resources[MAX_RESOURCES] = {
     {"/static/bar", "Bar", sizeof "Bar" - 1},
     {"/static/baz", "Baz", sizeof "Baz" - 1}};
 
+struct dht_state {
+  uint16_t self_id;
+  uint16_t pred_id;
+  const char *succ_ip;
+  const char *succ_port;
+} dht = {0};
+
+/**
+ * Determines if this node is responsible for the given hash
+ *
+ * @param hash The hash to check
+ * @param self_id The ID of this node
+ * @param pred_id The ID of the predecessor node
+ * @return true if this node is responsible, false otherwise
+ */
+static bool is_responsible(uint16_t hash, uint16_t self_id, uint16_t pred_id) {
+  // We are responsible for all hashes between our predecessor's ID (exclusive)
+  // and our own ID (inclusive)
+  if (pred_id < self_id) {
+    return hash > pred_id && hash <= self_id;
+  } else {
+    // Handle wrap-around case
+    return hash > pred_id || hash <= self_id;
+  }
+}
+
+/**
+ * Sends a redirect response to the client
+ *
+ * @param conn The connection socket
+ * @param ip The IP to redirect to
+ * @param port The port to redirect to
+ * @param uri The URI of the resource
+ */
+static void send_redirect(int conn, const char *ip, const char *port,
+                          const char *uri) {
+  char buffer[HTTP_MAX_SIZE];
+  int len = snprintf(buffer, sizeof(buffer),
+                     "HTTP/1.1 303 See Other\r\n"
+                     "Location: http://%s:%s%s\r\n"
+                     "Content-Length: 0\r\n\r\n",
+                     ip, port, uri);
+
+  if (send(conn, buffer, len, 0) == -1) {
+    perror("send");
+    close(conn);
+  }
+}
+
 /**
  * Sends an HTTP reply to the client based on the received request.
  *
@@ -30,8 +79,6 @@ struct tuple resources[MAX_RESOURCES] = {
  * information.
  */
 void send_reply(int conn, struct request *request) {
-
-  // Create a buffer to hold the HTTP reply
   char buffer[HTTP_MAX_SIZE];
   char *reply = buffer;
   size_t offset = 0;
@@ -39,6 +86,18 @@ void send_reply(int conn, struct request *request) {
   fprintf(stderr, "Handling %s request for %s (%lu byte payload)\n",
           request->method, request->uri, request->payload_length);
 
+  // Calculate hash of the URI
+  uint16_t uri_hash =
+      pseudo_hash((unsigned char *)request->uri, strlen(request->uri));
+
+  // Check if we're responsible for this resource
+  if (!is_responsible(uri_hash, dht.self_id, dht.pred_id)) {
+    // Redirect to successor
+    send_redirect(conn, dht.succ_ip, dht.succ_port, request->uri);
+    return;
+  }
+
+  // Handle the request locally as before
   if (strcmp(request->method, "GET") == 0) {
     // Find the resource with the given URI in the 'resources' array.
     size_t resource_length;
@@ -255,30 +314,28 @@ static int setup_server_socket(struct sockaddr_in addr) {
     exit(EXIT_FAILURE);
   }
 
-  // Avoid dead lock on connections that are dropped after poll returns but
-  // before accept is called
-  if (fcntl(sock, F_SETFL, O_NONBLOCK) == -1) {
-    perror("fcntl");
-    exit(EXIT_FAILURE);
-  }
-
-  // Set the SO_REUSEADDR socket option to allow reuse of local addresses
+  // Set SO_REUSEADDR and SO_REUSEPORT to allow binding to the port
   if (setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, &enable, sizeof(enable)) ==
-      -1) {
+          -1 ||
+      setsockopt(sock, SOL_SOCKET, SO_REUSEPORT, &enable, sizeof(enable)) ==
+          -1) {
     perror("setsockopt");
     exit(EXIT_FAILURE);
   }
 
-  // Bind socket to the provided address
+  // Set non-blocking mode after binding
   if (bind(sock, (struct sockaddr *)&addr, sizeof(addr)) == -1) {
     perror("bind");
     close(sock);
     exit(EXIT_FAILURE);
   }
 
-  // Start listening on the socket with maximum backlog of 1 pending
-  // connection
-  if (listen(sock, backlog)) {
+  if (fcntl(sock, F_SETFL, O_NONBLOCK) == -1) {
+    perror("fcntl");
+    exit(EXIT_FAILURE);
+  }
+
+  if (listen(sock, backlog) == -1) {
     perror("listen");
     exit(EXIT_FAILURE);
   }
@@ -326,69 +383,64 @@ static int setup_udp_socket(struct sockaddr_in addr) {
  *  ./build/webserver self.ip self.port
  */
 int main(int argc, char **argv) {
-  if (argc != 3) {
+  if (argc < 3) {
     return EXIT_FAILURE;
   }
 
+  // Get own ID (defaults to 0 if not provided)
+  dht.self_id = (argc > 3) ? strtoul(argv[3], NULL, 10) : 0;
+
+  // Get predecessor info from environment
+  const char *pred_id_str = getenv("PRED_ID");
+  const char *pred_ip = getenv("PRED_IP");
+  const char *pred_port = getenv("PRED_PORT");
+  dht.pred_id = pred_id_str ? strtoul(pred_id_str, NULL, 10) : dht.self_id;
+
+  // Get successor info from environment
+  const char *succ_id_str = getenv("SUCC_ID");
+  dht.succ_ip = getenv("SUCC_IP");
+  dht.succ_port = getenv("SUCC_PORT");
+  uint16_t succ_id = succ_id_str ? strtoul(succ_id_str, NULL, 10) : dht.self_id;
+
   struct sockaddr_in addr = derive_sockaddr(argv[1], argv[2]);
 
-  // Set up a server socket.
+  // Set up server sockets
   int server_socket = setup_server_socket(addr);
-
-  // Create an array of pollfd structures to monitor sockets.
-  struct pollfd sockets[3] = {
-      {.fd = server_socket, .events = POLLIN},
-      {.fd = -1, .events = 0}, // For TCP client
-      {.fd = -1, .events = 0}, // For UDP socket
-  };
-
   int udp_socket = setup_udp_socket(addr);
-  sockets[2].fd = udp_socket;
-  sockets[2].events = POLLIN;
+
+  struct pollfd sockets[3] = {{.fd = server_socket, .events = POLLIN},
+                              {.fd = -1, .events = 0},
+                              {.fd = udp_socket, .events = POLLIN}};
 
   struct connection_state state = {0};
   while (true) {
-
-    // Use poll() to wait for events on the monitored sockets.
     int ready = poll(sockets, sizeof(sockets) / sizeof(sockets[0]), -1);
     if (ready == -1) {
       perror("poll");
       exit(EXIT_FAILURE);
     }
 
-    // Process events on the monitored sockets.
     for (size_t i = 0; i < sizeof(sockets) / sizeof(sockets[0]); i += 1) {
       if (sockets[i].revents != POLLIN) {
-        // If there are no POLLIN events on the socket, continue to the
-        // next iteration.
         continue;
       }
       int s = sockets[i].fd;
 
       if (s == server_socket) {
-
-        // If the event is on the server_socket, accept a new connection
-        // from a client.
         int connection = accept(server_socket, NULL, NULL);
         if (connection == -1 && errno != EAGAIN && errno != EWOULDBLOCK) {
-          close(server_socket);
           perror("accept");
+          close(server_socket);
           exit(EXIT_FAILURE);
-        } else {
+        } else if (connection != -1) {
           connection_setup(&state, connection);
-
-          // limit to one connection at a time
           sockets[0].events = 0;
           sockets[1].fd = connection;
           sockets[1].events = POLLIN;
         }
-      } else {
-        assert(s == state.sock);
-
-        // Call the 'handle_connection' function to process the incoming
-        // data on the socket.
+      } else if (s == state.sock) {
         bool cont = handle_connection(&state);
-        if (!cont) { // get ready for a new connection
+        if (!cont) {
           sockets[0].events = POLLIN;
           sockets[1].fd = -1;
           sockets[1].events = 0;

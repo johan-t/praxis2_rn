@@ -9,7 +9,7 @@
  * A simple key-value entry
  *
  * Provides a simple, inefficient, key-value when combined with `get()`,
- * `set()`, and `delete()`.
+ * `set()`, and `remove_tuple()`.
  */
 struct tuple {
     string key;
@@ -39,4 +39,4 @@ bool set(const string key, char *value, size_t value_length,
  *
  * Returns true if it existed.
  */
-bool delete (const string key, struct tuple *tuples, size_t n_tuples);
+bool remove_tuple(const string key, struct tuple *tuples, size_t n_tuples);

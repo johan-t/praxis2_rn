@@ -31,7 +31,7 @@ uint16_t safe_strtoul(const char *restrict nptr, char **restrict endptr,
     return result;
 }
 
-
+// pseudo hash function for the DHT
 uint16_t pseudo_hash(const unsigned char *buffer, size_t buf_len) {
     // we use tcp crc16 check here
     uint32_t hash = 0;

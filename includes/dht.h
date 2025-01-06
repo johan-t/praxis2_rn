@@ -4,30 +4,35 @@
 #include <stdint.h>
 #include <netinet/in.h>
 
+#define MESSAGE_TYPE_LOOKUP 0
+#define MESSAGE_TYPE_REPLY 1
+
 #define MESSAGE_FORMAT_SIZE 12
 
-enum dht_message_type {
-    MESSAGE_TYPE_LOOKUP = 0,
-    MESSAGE_TYPE_REPLY = 1
-};
 
 struct dht_message {
-    enum dht_message_type type;
+    uint8_t type;
     uint16_t hash;
     uint16_t node_id;
     uint32_t node_ip;
     uint16_t node_port;
 } __attribute__((packed));
 
+
 struct dht_state {
     uint16_t self_id;
-    uint16_t pred_id;
-    uint16_t succ_id;
     const char *self_ip;
     uint16_t self_port;
+
+    uint16_t pred_id;
+    const char *pred_ip;
+    const char *pred_port;
+
+    uint16_t succ_id;
     const char *succ_ip;
     const char *succ_port;
 };
+
 
 /**
  * Initialize DHT state from command line arguments and environment variables
@@ -48,6 +53,11 @@ bool is_responsible(uint16_t hash, uint16_t self_id, uint16_t pred_id);
  * Send a lookup message to the successor node
  */
 void send_dht_lookup(int udp_socket, const struct dht_state *dht, uint16_t hash);
+
+/**
+ * Send a reply message to the successor node
+ */
+void send_dht_reply(int udp_socket, const struct dht_state *dht, uint16_t responsible_node_id, const char * responsible_node_ip, uint16_t responsible_node_port, uint16_t hash);
 
 /**
  * Convert host and port to sockaddr_in structure

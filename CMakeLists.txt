@@ -15,6 +15,9 @@ set(SOURCES
     src/util.c
     src/data.c
     src/dht.c
+    src/http_response.c
+    src/socket_handler.c
+    src/dht_handler.c
 )
 
 # Create executable

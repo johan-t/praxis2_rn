@@ -177,7 +177,7 @@ def test_lookup_reply(static_peer):
         pred_mock.sendto(dht.serialize(lookup), (self.ip, self.port))
 
         time.sleep(.1)
-
+        
         assert util.bytes_available(succ_mock) == 0, "Data received on successor socket"
         assert util.bytes_available(pred_mock) > 0, "No data received on predecessor socket"
         data = pred_mock.recv(1024)

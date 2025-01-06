@@ -310,18 +310,20 @@ def test_dht(static_peer):
             contexts.enter_context(static_peer(
                 peer, predecessor, successor
             ))
-
+            
+        
         # Ensure datum is missing
         contact = peers[contact_order[0]]
         with pytest.raises(req.HTTPError) as exception_info:
             util.urlopen(f'http://{contact.ip}:{contact.port}/dynamic/{datum}')
 
         assert exception_info.value.status == 404, f"'/dynamic/{datum}' should be missing, but GET was not answered with '404'"
-
+        
         # Create datum
         contact = peers[contact_order[1]]
         reply = util.urlopen(req.Request(f'http://{contact.ip}:{contact.port}/dynamic/{datum}', data=content, method='PUT'))
         assert reply.status == 201, f"Creation of '/dynamic/{datum}' did not yield '201'"
+
 
         # Ensure datum exists
         contact = peers[contact_order[2]]

@@ -69,8 +69,14 @@ static bool parse_header(char *buffer, size_t n, struct non_string *key,
     key->start = buffer;
     key->n = field_name_end - buffer;
     
-    value->start = field_name_end + 1;
-    value->n = (buffer + n) - (field_name_end + 1);
+    // Skip the colon and any following whitespace
+    char *value_start = field_name_end + 1;
+    while (value_start < buffer + n && (*value_start == ' ' || *value_start == '\t')) {
+        value_start++;
+    }
+    
+    value->start = value_start;
+    value->n = (buffer + n) - value_start;
 
     return true;
 }

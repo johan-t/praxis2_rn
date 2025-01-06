@@ -24,8 +24,8 @@ void send_reply(int conn, struct request *request, int udp_socket) {
     char *reply = buffer;
     size_t offset = 0;
 
-    fprintf(stderr, "Handling %s request for %s (%lu byte payload)\n",
-            request->method, request->uri, request->payload_length);
+    fprintf(stderr, "(%s:%d) Handling %s request for %s (%lu byte payload)\n",
+            dht.self_ip, dht.self_port, request->method, request->uri, request->payload_length);
 
     uint16_t uri_hash =
         pseudo_hash((unsigned char *)request->uri, strlen(request->uri));
@@ -33,10 +33,10 @@ void send_reply(int conn, struct request *request, int udp_socket) {
     // DHT PART
     // check if we are responsible
     if (is_responsible(uri_hash, dht.self_id, dht.pred_id)) {
-        fprintf(stderr, "Responsible for hash 0x%04x\n", uri_hash);
+        fprintf(stderr, "(%s:%d) Responsible for hash 0x%04x\n", dht.self_ip, dht.self_port, uri_hash);
 
-        // If it's a GET request and the resource doesn't exist, return 404
-        if (strcmp(request->method, "GET") == 0) {
+        // If it's a GET or DELETE request and the resource doesn't exist, return 404
+        if (strcmp(request->method, "GET") == 0 || strcmp(request->method, "DELETE") == 0) {
             size_t resource_length;
             const char *resource = get(request->uri, resources, MAX_RESOURCES, &resource_length);
             if (!resource) {
@@ -49,7 +49,8 @@ void send_reply(int conn, struct request *request, int udp_socket) {
     // check if our successor is responsible
     } else if (is_responsible(uri_hash, dht.succ_id, dht.self_id)) {
         // Our successor is responsible, redirect to it
-        fprintf(stderr, "Successor is responsible for hash 0x%04x, redirecting\n", uri_hash);
+        fprintf(stderr, "(%s:%d) Successor is responsible for hash 0x%04x, redirecting to: %s:%s\n", 
+                dht.self_ip, dht.self_port, uri_hash, dht.succ_ip, dht.succ_port);
         send_redirect(conn, dht.succ_ip, dht.succ_port, request->uri);
         return;
     } else {
@@ -58,24 +59,42 @@ void send_reply(int conn, struct request *request, int udp_socket) {
         const char *responsible_ip;
         uint16_t responsible_port;
         
+        // First check if we already have a reply
         if (get_last_dht_reply(&responsible_id, &responsible_ip, &responsible_port)) {
-            // We have received a reply, redirect to the responsible node
-            fprintf(stderr, "Received reply for hash 0x%04x, redirecting\n", uri_hash);
+            // We have a reply, redirect to the responsible node
+            fprintf(stderr, "(%s:%d) Have reply for hash 0x%04x, redirecting to: %s:%d\n", 
+                    dht.self_ip, dht.self_port, uri_hash, responsible_ip, responsible_port);
             char port_str[6];
             snprintf(port_str, sizeof(port_str), "%d", responsible_port);
             send_redirect(conn, responsible_ip, port_str, request->uri);
             return;
-        } else {
-            // Neither we nor our successor is responsible, forward lookup
-            fprintf(stderr, "Not responsible for hash 0x%04x, forwarding to successor\n", uri_hash);
-            send_dht_lookup(udp_socket, &dht, uri_hash);
-            send_service_unavailable(conn);
+        }
+        
+        // No reply yet, send lookup
+        fprintf(stderr, "(%s:%d) No reply yet for hash 0x%04x, sending lookup to successor: %s:%s\n", 
+                dht.self_ip, dht.self_port, uri_hash, dht.succ_ip, dht.succ_port);
+        send_dht_lookup(udp_socket, &dht, uri_hash);
+        
+        // Check again for reply after sending lookup
+        if (get_last_dht_reply(&responsible_id, &responsible_ip, &responsible_port)) {
+            // Got a reply after lookup, redirect
+            fprintf(stderr, "(%s:%d) Got reply after lookup for hash 0x%04x, redirecting to: %s:%d\n", 
+                    dht.self_ip, dht.self_port, uri_hash, responsible_ip, responsible_port);
+            char port_str[6];
+            snprintf(port_str, sizeof(port_str), "%d", responsible_port);
+            send_redirect(conn, responsible_ip, port_str, request->uri);
             return;
         }
+        
+        // Still no reply, send 503
+        fprintf(stderr, "(%s:%d) No reply after lookup for hash 0x%04x, sending 503\n", 
+                dht.self_ip, dht.self_port, uri_hash);
+        send_service_unavailable(conn);
+        return;
     }
 
     // WEBSERVER PART
-    fprintf(stderr, "Responsible for hash 0x%04x\n", uri_hash);
+    fprintf(stderr, "(%s:%d) Handling request locally\n", dht.self_ip, dht.self_port);
 
     if (strcmp(request->method, "GET") == 0) {
         handle_get_request(conn, request->uri, &offset, reply);
@@ -91,10 +110,10 @@ void send_reply(int conn, struct request *request, int udp_socket) {
 
     send_http_response(conn, reply, offset);
 
-    fprintf(stderr, "URI hash: 0x%04x, self_id: 0x%04x, pred_id: 0x%04x\n",
-            uri_hash, dht.self_id, dht.pred_id);
-    fprintf(stderr, "Is responsible: %d\n",
-            is_responsible(uri_hash, dht.self_id, dht.pred_id));
+    fprintf(stderr, "(%s:%d) URI hash: 0x%04x, self_id: 0x%04x, pred_id: 0x%04x\n",
+            dht.self_ip, dht.self_port, uri_hash, dht.self_id, dht.pred_id);
+    fprintf(stderr, "(%s:%d) Is responsible: %d\n",
+            dht.self_ip, dht.self_port, is_responsible(uri_hash, dht.self_id, dht.pred_id));
 }
 
 size_t process_packet(int conn, char *buffer, size_t n, int udp_socket) {
@@ -212,17 +231,13 @@ void handle_server_socket(int server_socket, struct pollfd *sockets,
 
 void handle_client_socket(struct connection_state *state,
                          struct pollfd *sockets, int udp_socket) {
-    bool cont = handle_connection(state, udp_socket);
+    bool cont = handle_incoming_data(state, udp_socket);
 
     if (!cont) {
         sockets[0].events = POLLIN;
         sockets[1].fd = -1;
         sockets[1].events = 0;
     }
-}
-
-bool handle_connection(struct connection_state *state, int udp_socket) {
-    return handle_incoming_data(state, udp_socket);
 }
 
 bool handle_incoming_data(struct connection_state *state, int udp_socket) {

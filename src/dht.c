@@ -31,6 +31,9 @@ void send_dht_lookup(int udp_socket, const struct dht_state *dht, uint16_t hash)
         .node_port = htons(dht->self_port)
     };
 
+    fprintf(stderr, "(%s:%d) Sending DHT lookup for hash 0x%04x to successor: %s:%s\n",
+            dht->self_ip, dht->self_port, hash, dht->succ_ip, dht->succ_port);
+
     if (sendto(udp_socket, &msg, sizeof(msg), 0, (struct sockaddr *)&addr, sizeof(addr)) == -1) {
         perror("sendto");
     }
@@ -66,8 +69,9 @@ void send_dht_reply(int udp_socket, const struct dht_state *dht,
         .node_port = htons(resp_port_num)  // Port of the responsible node
     };
 
-    fprintf(stderr, "Sending reply to %s:%d: responsible=%04x, predecessor=%04x\n",
-            requesting_node_ip, requesting_node_port, responsible_node_id, predecessor_id);
+    fprintf(stderr, "(%s:%d) Sending DHT reply to %s:%d: responsible=%04x, predecessor=%04x\n",
+            dht->self_ip, dht->self_port, requesting_node_ip, requesting_node_port, 
+            responsible_node_id, predecessor_id);
 
     if (sendto(udp_socket, &msg, sizeof(msg), 0, 
                (struct sockaddr *)&addr, sizeof(addr)) == -1) {

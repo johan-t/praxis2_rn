@@ -1,7 +1,6 @@
 #include <arpa/inet.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <string.h>
 #include "dht.h"
 #include "dht_handler.h"
 
@@ -22,21 +21,25 @@ void handle_dht_message(int udp_socket, const struct dht_message *msg,
     inet_ntop(AF_INET, &(sender->sin_addr), sender_ip, INET_ADDRSTRLEN);
 
     if (msg->type == MESSAGE_TYPE_LOOKUP) {
-        fprintf(stderr, "Received lookup for hash 0x%04x from %s:%d\n", hash, sender_ip, sender_port);
+        fprintf(stderr, "(%s:%d) Received lookup for hash 0x%04x from %s:%d\n", 
+                dht->self_ip, dht->self_port, hash, sender_ip, sender_port);
         
         // Check if our successor is responsible for the hash
         if (is_responsible(hash, dht->succ_id, dht->self_id)) {
-            fprintf(stderr, "Our successor is responsible for hash 0x%04x\n", hash);
+            fprintf(stderr, "(%s:%d) Our successor is responsible for hash 0x%04x\n", 
+                    dht->self_ip, dht->self_port, hash);
             send_dht_reply(udp_socket, dht, dht->succ_id, sender_ip, sender_port, dht->self_id);
         }
         // Check if we are responsible for the hash
         else if (is_responsible(hash, dht->self_id, dht->pred_id)) {
-            fprintf(stderr, "We are responsible for hash 0x%04x\n", hash);
+            fprintf(stderr, "(%s:%d) We are responsible for hash 0x%04x\n", 
+                    dht->self_ip, dht->self_port, hash);
             send_dht_reply(udp_socket, dht, dht->self_id, sender_ip, sender_port, dht->pred_id);
         }
         // Neither we nor our successor is responsible
         else {
-            fprintf(stderr, "Forwarding lookup for hash 0x%04x to successor\n", hash);
+            fprintf(stderr, "(%s:%d) Forwarding lookup for hash 0x%04x to successor: %s:%s\n", 
+                    dht->self_ip, dht->self_port, hash, dht->succ_ip, dht->succ_port);
             struct sockaddr_in succ_addr;
             succ_addr.sin_family = AF_INET;
             succ_addr.sin_port = htons(atoi(dht->succ_port));
@@ -48,6 +51,8 @@ void handle_dht_message(int udp_socket, const struct dht_message *msg,
             }
         }
     } else if (msg->type == MESSAGE_TYPE_REPLY) {
+        fprintf(stderr, "(%s:%d) Received DHT reply from %s:%d: responsible=%04x, predecessor=%04x\n",
+                dht->self_ip, dht->self_port, sender_ip, sender_port, node_id, hash);
         last_dht_reply.received = true;
         last_dht_reply.responsible_id = node_id;
         last_dht_reply.responsible_ip = inet_ntoa(*(struct in_addr *)&msg->node_ip);

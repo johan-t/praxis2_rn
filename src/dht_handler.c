@@ -20,6 +20,10 @@ void handle_dht_message(int udp_socket, const struct dht_message *msg,
     char sender_ip[INET_ADDRSTRLEN];
     inet_ntop(AF_INET, &(sender->sin_addr), sender_ip, INET_ADDRSTRLEN);
 
+    char requester_ip[INET_ADDRSTRLEN];
+    inet_ntop(AF_INET, &(msg->node_ip), requester_ip, INET_ADDRSTRLEN);
+    uint16_t requester_port = ntohs(msg->node_port);
+
     if (msg->type == MESSAGE_TYPE_LOOKUP) {
         fprintf(stderr, "(%s:%d) Received lookup for hash 0x%04x from %s:%d\n", 
                 dht->self_ip, dht->self_port, hash, sender_ip, sender_port);
@@ -28,13 +32,13 @@ void handle_dht_message(int udp_socket, const struct dht_message *msg,
         if (is_responsible(hash, dht->succ_id, dht->self_id)) {
             fprintf(stderr, "(%s:%d) Our successor is responsible for hash 0x%04x\n", 
                     dht->self_ip, dht->self_port, hash);
-            send_dht_reply(udp_socket, dht, dht->succ_id, sender_ip, sender_port, dht->self_id);
+            send_dht_reply(udp_socket, dht, dht->succ_id, requester_ip, requester_port, dht->self_id);
         }
         // Check if we are responsible for the hash
         else if (is_responsible(hash, dht->self_id, dht->pred_id)) {
             fprintf(stderr, "(%s:%d) We are responsible for hash 0x%04x\n", 
                     dht->self_ip, dht->self_port, hash);
-            send_dht_reply(udp_socket, dht, dht->self_id, sender_ip, sender_port, dht->pred_id);
+            send_dht_reply(udp_socket, dht, dht->self_id, requester_ip, requester_port, dht->pred_id);
         }
         // Neither we nor our successor is responsible
         else {

@@ -78,7 +78,7 @@ def test_listen(static_peer):
 
 
 @pytest.mark.timeout(1)
-@pytest.mark.parametrize("uri", ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h'])
+@pytest.mark.parametrize("uri", ['a', 'b', 'aa', 'ab', 'ac', 'ad', 'klm', 'xyz'])
 def test_immediate_dht(static_peer, uri):
     """Test hashing of request (1.2)
     Run peer in minimal (non-trivial) DHT
@@ -121,7 +121,7 @@ def test_immediate_dht(static_peer, uri):
 
 
 @pytest.mark.timeout(1)
-@pytest.mark.parametrize("uri", ['a', 'b'])
+@pytest.mark.parametrize("uri", ['a', 'aa'])
 def test_lookup_sent(static_peer, uri):
     """Test for lookup to correct peer (1.3)
 
@@ -177,7 +177,7 @@ def test_lookup_reply(static_peer):
         pred_mock.sendto(dht.serialize(lookup), (self.ip, self.port))
 
         time.sleep(.1)
-        
+
         assert util.bytes_available(succ_mock) == 0, "Data received on successor socket"
         assert util.bytes_available(pred_mock) > 0, "No data received on predecessor socket"
         data = pred_mock.recv(1024)
@@ -219,7 +219,7 @@ def test_lookup_forward(static_peer):
 
 
 @pytest.mark.timeout(1)
-@pytest.mark.parametrize("uri", ['a', 'b'])
+@pytest.mark.parametrize("uri", ['a', 'aa'])
 def test_lookup_complete(static_peer, uri):
     """Test for correct lookup use (1.6)
 
@@ -310,20 +310,18 @@ def test_dht(static_peer):
             contexts.enter_context(static_peer(
                 peer, predecessor, successor
             ))
-            
-        
+
         # Ensure datum is missing
         contact = peers[contact_order[0]]
         with pytest.raises(req.HTTPError) as exception_info:
             util.urlopen(f'http://{contact.ip}:{contact.port}/dynamic/{datum}')
 
         assert exception_info.value.status == 404, f"'/dynamic/{datum}' should be missing, but GET was not answered with '404'"
-        
+
         # Create datum
         contact = peers[contact_order[1]]
         reply = util.urlopen(req.Request(f'http://{contact.ip}:{contact.port}/dynamic/{datum}', data=content, method='PUT'))
         assert reply.status == 201, f"Creation of '/dynamic/{datum}' did not yield '201'"
-
 
         # Ensure datum exists
         contact = peers[contact_order[2]]

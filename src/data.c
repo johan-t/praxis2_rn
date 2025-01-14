@@ -1,76 +1,67 @@
-#include <data.h>
+#include "data.h"
 
-#include <stdlib.h>
 #include <string.h>
-
-static struct tuple *find_empty_slot(struct tuple *tuples, size_t n_tuples) {
-    for (size_t i = 0; i < n_tuples; i += 1) {
-        if (tuples[i].key == NULL) {
-            return &tuples[i];
-        }
-    }
-    return NULL;
-}
 
 struct tuple *find(string key, struct tuple *tuples, size_t n_tuples) {
     for (size_t i = 0; i < n_tuples; i += 1) {
-        if (!tuples[i].key) continue;
-        if (strcmp(key, tuples[i].key) == 0) {
+        // compare keys with 'strcmp'
+        if (tuples[i].key && strcmp(key, tuples[i].key) == 0) {
             return &(tuples[i]);
         }
     }
     return NULL;
 }
 
-static void update_tuple_value(struct tuple *tuple, char *value, size_t value_length) {
-    free(tuple->value);
-    tuple->value = (char *)malloc(value_length * sizeof(char));
-    memcpy(tuple->value, value, value_length);
-    tuple->value_length = value_length;
-}
-
-static void create_new_tuple(struct tuple *tuple, const string key, char *value, size_t value_length) {
-    tuple->key = (char *)malloc((strlen(key) + 1) * sizeof(char));
-    strcpy(tuple->key, key);
-    tuple->value = (char *)malloc(value_length * sizeof(char));
-    memcpy(tuple->value, value, value_length);
-    tuple->value_length = value_length;
-}
-
-const char *get(const string key, struct tuple *tuples, size_t n_tuples, size_t *value_length) {
-    struct tuple *tuple = find(key, tuples, n_tuples);
-    if (!tuple) return NULL;
-    
-    *value_length = tuple->value_length;
-    return tuple->value;
-}
-
-bool set(const string key, char *value, size_t value_length, struct tuple *tuples, size_t n_tuples) {
+const char *get(const string key, struct tuple *tuples, size_t n_tuples,
+                size_t *value_length) {
     struct tuple *tuple = find(key, tuples, n_tuples);
     if (tuple) {
-        update_tuple_value(tuple, value, value_length);
-        return true;
+        *value_length = tuple->value_length;
+        return tuple->value;
+    } else {
+        return NULL;
     }
-
-    tuple = find_empty_slot(tuples, n_tuples);
-    if (!tuple) return false;
-
-    create_new_tuple(tuple, key, value, value_length);
-    return false;
 }
 
-static void clear_tuple(struct tuple *tuple) {
-    free(tuple->key);
-    free(tuple->value);
-    tuple->key = NULL;
-    tuple->value = NULL;
-    tuple->value_length = 0;
-}
-
-bool remove_tuple(const string key, struct tuple *tuples, size_t n_tuples) {
+bool set(const string key, char *value, size_t value_length,
+         struct tuple *tuples, size_t n_tuples) {
+    // check if tuple already exists
     struct tuple *tuple = find(key, tuples, n_tuples);
-    if (!tuple) return false;
 
-    clear_tuple(tuple);
-    return true;
+    if (tuple) { // overwrite existing value
+        free(tuple->value);
+        tuple->value = (char *)malloc(value_length * sizeof(char));
+        strcpy(tuple->value, value);
+        tuple->value_length = value_length;
+        return true;
+    } else { // add tuple
+        for (size_t i = 0; i < n_tuples; i += 1) {
+            if (tuples[i].key == NULL) {
+                tuples[i].key =
+                    (char *)malloc((strlen(key) + 1) * sizeof(char));
+                strcpy(tuples[i].key, key);
+                tuples[i].value = (char *)malloc(value_length * sizeof(char));
+                memcpy(tuples[i].value, value, value_length);
+                tuples[i].value_length = value_length;
+                return false;
+            }
+        }
+    }
+    return false; // fail silently if no space for a new tuple is available
+}
+
+// MODIFIED delete -> remove_tuple
+bool remove_tuple (const string key, struct tuple *tuples, size_t n_tuples) {
+    struct tuple *tuple = find(key, tuples, n_tuples);
+
+    if (tuple) {
+        free(tuple->key);
+        tuple->key = NULL;
+        free(tuple->value);
+        tuple->value = NULL;
+        tuple->value_length = 0;
+        return true;
+    } else {
+        return false;
+    }
 }
